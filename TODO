@@ -1,0 +1,4 @@
+debug I/O failure for large files
+chunk and use disk storage (chrome only)
+allow for disconnects and pausing
+remove "peershare" require only 4 digits and append to hidden "PeErShArE"
