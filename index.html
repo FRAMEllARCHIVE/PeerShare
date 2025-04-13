@@ -490,27 +490,29 @@ peer.on('open', id => {
       setupConnection();
     });
 
-    elements.connectBtn.addEventListener('click', () => {
-      const destId = elements.connectToId.value.trim();
-      if (!destId) {
-        showNotification('Please enter a peer ID to connect to', 'Input Required', 'error');
-        return;
-      }
-      
-      elements.connectionStatus.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Connecting to ${destId}...`;
-      conn = peer.connect(destId, { reliable: true });
-      
-      conn.on('open', () => {
-        setupConnection();
-      });
-      
-      conn.on('error', (err) => {
-        elements.connectionStatus.innerHTML = `<i class="fas fa-circle-exclamation"></i> Connection failed`;
-        elements.connectionStatus.className = 'status disconnected';
-        showNotification('Failed to connect to peer', 'Connection Error', 'error');
-      });
-    });
+elements.connectBtn.addEventListener('click', () => {
+  const destDigits = elements.connectToId.value.trim();
+  if (!destDigits || !/^\d{4}$/.test(destDigits)) {
+    showNotification('Enter a valid 4-digit ID', 'Input Required', 'error');
+    return;
+  }
 
+  const destId = `peershare${destDigits}`;
+
+  elements.connectionStatus.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Connecting to ${destId}...`;
+  conn = peer.connect(destId, { reliable: true });
+
+  conn.on('open', () => {
+    setupConnection();
+  });
+
+  conn.on('error', (err) => {
+    elements.connectionStatus.innerHTML = `<i class="fas fa-circle-exclamation"></i> Connection failed`;
+    elements.connectionStatus.className = 'status disconnected';
+    showNotification('Failed to connect to peer', 'Connection Error', 'error');
+  });
+});
+    
     elements.copyBtn.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(elements.myId.value);
