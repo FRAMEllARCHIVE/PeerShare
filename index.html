@@ -475,8 +475,9 @@
     });
 
 peer.on('open', id => {
-  elements.myId.value = id.replace('peershare', '');
-  showNotification(`Your Peer ID is: ${id}`, 'Ready to Connect', 'success');
+  const displayId = id.replace('peershare', '');
+  elements.myId.value = displayId;
+  showNotification(`Your Peer ID is: ${displayId}`, 'Ready to Connect', 'success');
 });
 
     peer.on('error', err => {
