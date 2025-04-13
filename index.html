@@ -474,10 +474,10 @@
       elements.notification.classList.remove('show');
     });
 
-    peer.on('open', id => {
-      elements.myId.value = id;
-      showNotification(`Your Peer ID is: ${id}`, 'Ready to Connect', 'success');
-    });
+peer.on('open', id => {
+  elements.myId.value = id.replace('peershare', '');
+  showNotification(`Your Peer ID is: ${id}`, 'Ready to Connect', 'success');
+});
 
     peer.on('error', err => {
       elements.connectionStatus.innerHTML = `<i class="fas fa-circle-exclamation"></i> Error: ${err.type}`;
