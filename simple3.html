@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureDrop - P2P File Transfer</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="https://unpkg.com/streamsaver@2.0.5/stream-saver.js"></script>
+  <style>
+    :root {
+      --primary: #4a69bd;
+      --primary-dark: #3a5698;
+      --success: #44bd32;
+      --danger: #e84118;
+      --warning: #fbc531;
+      --light: #f5f6fa;
+      --dark: #2f3640;
+      --shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      padding: 2rem;
+      max-width: 700px;
+      margin: auto;
+      line-height: 1.6;
+      color: var(--dark);
+      background-color: var(--light);
+    }
+    
+    h1, h2 {
+      color: var(--primary-dark);
+      margin-bottom: 1rem;
+    }
+    
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: var(--shadow);
+    }
+    
+    .section {
+      margin-bottom: 1.5rem;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+    
+    input, button {
+      margin-bottom: 1rem;
+      display: block;
+      width: 100%;
+      padding: 0.75rem;
+      font-size: 1rem;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+    }
+    
+    input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(74, 105, 189, 0.2);
+    }
+    
+    button {
+      background-color: var(--primary);
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background-color 0.2s ease;
+    }
+    
+    button:hover {
+      background-color: var(--primary-dark);
+    }
+    
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    
+    .copy-btn {
+      background-color: #f5f6fa;
+      color: var(--dark);
+      border: 1px solid #ddd;
+      font-size: 0.9rem;
+      padding: 0.4rem;
+      margin-top: 0.5rem;
+    }
+    
+    .copy-btn:hover {
+      background-color: #e9eaed;
+    }
+    
+    #file-input {
+      border: 2px dashed #ddd;
+      padding: 2rem 1rem;
+      text-align: center;
+      cursor: pointer;
+      background-color: #f9f9f9;
+      margin-bottom: 1rem;
+    }
+    
+    #file-input:hover {
+      border-color: var(--primary);
+      background-color: #f0f4ff;
+    }
+
+    #file-input.drag-over {
+      border-color: var(--success);
+      background-color: rgba(68, 189, 50, 0.1);
+    }
+    
+    #log {
+      white-space: pre-wrap;
+      background: #f5f6fa;
+      padding: 1rem;
+      height: 200px;
+      overflow-y: auto;
+      margin-top: 1rem;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+      font-family: monospace;
+      font-size: 0.9rem;
+    }
+    
+    .log-entry {
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .log-time {
+      color: #777;
+      margin-right: 0.5rem;
+    }
+    
+    #progress-container {
+      margin-top: 1rem;
+      display: none;
+    }
+    
+    #progress-bar {
+      width: 100%;
+      background: #ddd;
+      height: 20px;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 0.5rem;
+    }
+    
+    #progress {
+      width: 0;
+      background: var(--success);
+      height: 100%;
+      border-radius: 10px;
+      transition: width 0.3s ease;
+    }
+    
+    #status {
+      margin-top: 0.5rem;
+      font-size: 1rem;
+      text-align: center;
+    }
+
+    .file-info {
+      display: flex;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .file-icon {
+      font-size: 2rem;
+      margin-right: 1rem;
+    }
+
+    .file-details {
+      flex-grow: 1;
+    }
+
+    .file-name {
+      font-weight: bold;
+      word-break: break-all;
+    }
+
+    .file-size {
+      color: #777;
+      font-size: 0.9rem;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .alert {
+      padding: 1rem;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      border-left: 4px solid;
+    }
+
+    .alert-info {
+      background-color: #e3f2fd;
+      border-color: #2196f3;
+    }
+
+    .alert-success {
+      background-color: #e8f5e9;
+      border-color: var(--success);
+    }
+
+    .alert-warning {
+      background-color: #fff8e1;
+      border-color: var(--warning);
+    }
+
+    .alert-error {
+      background-color: #ffebee;
+      border-color: var(--danger);
+    }
+
+    .connection-status {
+      display: flex;
+      align-items: center;
+      margin-bottom: 1rem;
+      font-weight: 600;
+    }
+
+    .status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 0.5rem;
+      background-color: #ccc;
+    }
+
+    .status-connected {
+      background-color: var(--success);
+    }
+
+    .tabs {
+      display: flex;
+      margin-bottom: 1rem;
+    }
+
+    .tab {
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      font-weight: 600;
+      flex: 1;
+      text-align: center;
+    }
+
+    .tab.active {
+      border-bottom-color: var(--primary);
+      color: var(--primary);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    @media (max-width: 600px) {
+      body {
+        padding: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>SecureDrop</h1>
+  <p>Peer-to-peer file sharing with no server storage</p>
+
+  <div class="card">
+    <div class="connection-status">
+      <span class="status-indicator" id="connection-indicator"></span>
+      <span id="connection-status">Not connected</span>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="connect">Connect</div>
+      <div class="tab" data-tab="transfer">Transfer Files</div>
+    </div>
+
+    <div class="tab-content active" id="connect-tab">
+      <div class="section">
+        <label>Your Share Code:</label>
+        <div style="display: flex; gap: 0.5rem;">
+          <input type="text" id="my-id" readonly />
+          <button class="copy-btn" id="copy-id-btn" style="width: auto; margin: 0;">Copy</button>
+        </div>
+        <p style="font-size: 0.9rem; color: #777;">Share this code with someone you want to connect with</p>
+      </div>
+
+      <div class="section">
+        <label>Enter Code to Connect:</label>
+        <input type="text" id="connect-id" placeholder="e.g. 4217" maxlength="4" pattern="[0-9]{4}" />
+        <button id="connect-btn">Connect</button>
+      </div>
+
+      <div id="alert-container"></div>
+    </div>
+
+    <div class="tab-content" id="transfer-tab">
+      <div class="section" id="file-section">
+        <label>Choose a file to send:</label>
+        <div id="file-input">
+          <span id="file-prompt">Drop files here or click to browse</span>
+          <div id="selected-file" class="file-info hidden">
+            <div class="file-icon">📄</div>
+            <div class="file-details">
+              <div class="file-name" id="file-name"></div>
+              <div class="file-size" id="file-size"></div>
+            </div>
+          </div>
+          <input type="file" id="file-selector" style="display: none;" />
+        </div>
+        <button id="send-btn" disabled>Send File</button>
+      </div>
+
+      <div id="progress-container">
+        <h3 id="transfer-title">Transferring File</h3>
+        <div id="progress-bar">
+          <div id="progress"></div>
+        </div>
+        <div id="status">Preparing transfer...</div>
+        <div id="transfer-speed" style="text-align: center; font-size: 0.9rem; color: #777;"></div>
+        <div id="estimated-time" style="text-align: center; font-size: 0.9rem; color: #777;"></div>
+        <button id="cancel-btn" style="margin-top: 1rem; background-color: var(--danger);">Cancel Transfer</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Connection Log</h3>
+    <div id="log"></div>
+    <button id="clear-log" style="margin-top: 1rem; background-color: #777;">Clear Log</button>
+  </div>
+
+  <script>
+    // Constants
+    const PREFIX = 'securedrop';
+    const CHUNK_SIZE = 256 * 1024; // 256 KB chunks
+
+    // DOM Elements
+    const elements = {
+      myId: document.getElementById('my-id'),
+      connectId: document.getElementById('connect-id'),
+      connectBtn: document.getElementById('connect-btn'),
+      fileInput: document.getElementById('file-input'),
+      fileSelector: document.getElementById('file-selector'),
+      filePrompt: document.getElementById('file-prompt'),
+      selectedFile: document.getElementById('selected-file'),
+      fileName: document.getElementById('file-name'),
+      fileSize: document.getElementById('file-size'),
+      sendBtn: document.getElementById('send-btn'),
+      progressContainer: document.getElementById('progress-container'),
+      progressBar: document.getElementById('progress'),
+      status: document.getElementById('status'),
+      transferSpeed: document.getElementById('transfer-speed'),
+      estimatedTime: document.getElementById('estimated-time'),
+      transferTitle: document.getElementById('transfer-title'),
+      cancelBtn: document.getElementById('cancel-btn'),
+      log: document.getElementById('log'),
+      clearLog: document.getElementById('clear-log'),
+      copyIdBtn: document.getElementById('copy-id-btn'),
+      alertContainer: document.getElementById('alert-container'),
+      connectionStatus: document.getElementById('connection-status'),
+      connectionIndicator: document.getElementById('connection-indicator'),
+      tabs: document.querySelectorAll('.tab'),
+      tabContents: document.querySelectorAll('.tab-content')
+    };
+
+    // State
+    let state = {
+      peer: null,
+      conn: null,
+      file: null,
+      transferring: false,
+      receiving: false,
+      writer: null,
+      fileStream: null,
+      fileMeta: null,
+      receivedSize: 0,
+      startTime: null,
+      lastUpdateTime: null,
+      lastReceivedSize: 0,
+      cancelTransfer: false
+    };
+
+    // Helper functions
+    function formatBytes(bytes, decimals = 2) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const dm = decimals < 0 ? 0 : decimals;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    function formatTime(seconds) {
+      if (seconds < 60) return `${Math.floor(seconds)} seconds`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)} min ${Math.floor(seconds % 60)} sec`;
+      return `${Math.floor(seconds / 3600)} hr ${Math.floor((seconds % 3600) / 60)} min`;
+    }
+
+    function getFileIcon(fileName) {
+      const extension = fileName.split('.').pop().toLowerCase();
+      const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'];
+      const documentExts = ['pdf', 'doc', 'docx', 'txt', 'rtf', 'odt'];
+      const spreadsheetExts = ['xls', 'xlsx', 'csv', 'ods'];
+      const presentationExts = ['ppt', 'pptx', 'odp'];
+      const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz'];
+      const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'm4a'];
+      const videoExts = ['mp4', 'avi', 'mov', 'mkv', 'webm'];
+      
+      if (imageExts.includes(extension)) return '🖼️';
+      if (documentExts.includes(extension)) return '📄';
+      if (spreadsheetExts.includes(extension)) return '📊';
+      if (presentationExts.includes(extension)) return '📑';
+      if (archiveExts.includes(extension)) return '🗜️';
+      if (audioExts.includes(extension)) return '🎵';
+      if (videoExts.includes(extension)) return '🎬';
+      return '📁';
+    }
+
+    function getCurrentTimestamp() {
+      const now = new Date();
+      return now.toLocaleTimeString();
+    }
+
+    function logMessage(message, type = 'info') {
+      const logEntry = document.createElement('div');
+      logEntry.className = 'log-entry';
+      
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'log-time';
+      timeSpan.textContent = getCurrentTimestamp();
+      
+      const messageSpan = document.createElement('span');
+      messageSpan.textContent = message;
+      
+      if (type === 'error') {
+        messageSpan.style.color = 'var(--danger)';
+      } else if (type === 'success') {
+        messageSpan.style.color = 'var(--success)';
+      } else if (type === 'warning') {
+        messageSpan.style.color = 'var(--warning)';
+      }
+      
+      logEntry.appendChild(timeSpan);
+      logEntry.appendChild(messageSpan);
+      
+      elements.log.appendChild(logEntry);
+      elements.log.scrollTop = elements.log.scrollHeight;
+    }
+
+    function showAlert(message, type = 'info') {
+      const alertDiv = document.createElement('div');
+      alertDiv.className = `alert alert-${type}`;
+      alertDiv.textContent = message;
+      
+      // Add close button
+      const closeBtn = document.createElement('span');
+      closeBtn.innerHTML = '&times;';
+      closeBtn.style.float = 'right';
+      closeBtn.style.cursor = 'pointer';
+      closeBtn.onclick = () => alertDiv.remove();
+      alertDiv.prepend(closeBtn);
+      
+      elements.alertContainer.appendChild(alertDiv);
+      
+      // Auto-remove after 5 seconds for success messages
+      if (type === 'success') {
+        setTimeout(() => {
+          if (alertDiv.parentNode) {
+            alertDiv.remove();
+          }
+        }, 5000);
+      }
+    }
+
+    function updateConnectionStatus(connected, peer = null) {
+      if (connected) {
+        elements.connectionStatus.textContent = `Connected to ${peer}`;
+        elements.connectionIndicator.classList.add('status-connected');
+        // Enable the transfer tab
+        document.querySelector('.tab[data-tab="transfer"]').classList.remove('disabled');
+        elements.sendBtn.disabled = !state.file;
+      } else {
+        elements.connectionStatus.textContent = 'Not connected';
+        elements.connectionIndicator.classList.remove('status-connected');
+        elements.sendBtn.disabled = true;
+      }
+    }
+
+    function updateTransferProgress(loaded, total, isUpload = true) {
+      const percent = Math.min(100, Math.round((loaded / total) * 100));
+      elements.progressBar.style.width = `${percent}%`;
+      
+      const now = Date.now();
+      const elapsedMs = now - state.startTime;
+      
+      // Update speed and ETA every 500ms
+      if (now - state.lastUpdateTime > 500) {
+        // Calculate speed in bytes per second
+        const timeDiff = (now - state.lastUpdateTime) / 1000;
+        const loadedDiff = isUpload ? 
+          loaded - state.lastReceivedSize :
+          state.receivedSize - state.lastReceivedSize;
+        
+        const speedBps = loadedDiff / timeDiff;
+        const formattedSpeed = formatBytes(speedBps) + '/s';
+        
+        // Calculate ETA
+        const remaining = total - loaded;
+        const eta = remaining / speedBps;
+        
+        elements.transferSpeed.textContent = `Speed: ${formattedSpeed}`;
+        elements.estimatedTime.textContent = `ETA: ${formatTime(eta)}`;
+        
+        state.lastUpdateTime = now;
+        state.lastReceivedSize = isUpload ? loaded : state.receivedSize;
+      }
+      
+      elements.status.textContent = `${isUpload ? 'Sending' : 'Downloading'}: ${percent}% (${formatBytes(loaded)} / ${formatBytes(total)})`;
+    }
+
+    function resetFileInput() {
+      state.file = null;
+      elements.fileSelector.value = '';
+      elements.selectedFile.classList.add('hidden');
+      elements.filePrompt.classList.remove('hidden');
+      elements.sendBtn.disabled = true;
+    }
+
+    function resetTransferState() {
+      state.transferring = false;
+      state.receiving = false;
+      state.receivedSize = 0;
+      state.startTime = null;
+      state.lastUpdateTime = null;
+      state.lastReceivedSize = 0;
+      state.cancelTransfer = false;
+      
+      elements.progressContainer.style.display = 'none';
+      elements.progressBar.style.width = '0%';
+      elements.transferSpeed.textContent = '';
+      elements.estimatedTime.textContent = '';
+    }
+
+    // Initialize PeerJS connection
+    function initializePeer() {
+      // Generate a random 4-digit code
+      const generatePeerId = () => {
+        const suffix = Math.floor(Math.random() * 9000 + 1000);
+        window.peerSuffix = suffix;
+        return PREFIX + suffix;
+      };
+
+      try {
+        state.peer = new Peer(generatePeerId(), {
+          host: 'peerjs.com',
+          port: 443,
+          secure: true,
+          debug: 2
+        });
+
+        state.peer.on('open', id => {
+          elements.myId.value = window.peerSuffix;
+          logMessage(`Connected to PeerJS server with ID: ${window.peerSuffix}`);
+        });
+
+        state.peer.on('connection', connection => {
+          // Only allow one connection at a time
+          if (state.conn && state.conn.open) {
+            logMessage('Received connection request but already connected to another peer', 'warning');
+            connection.close();
+            return;
+          }
+
+          state.conn = connection;
+          
+          state.conn.on('open', () => {
+            logMessage(`Incoming connection from ${state.conn.peer.substring(PREFIX.length)}`, 'success');
+            updateConnectionStatus(true, state.conn.peer.substring(PREFIX.length));
+            showAlert('Connection established!', 'success');
+            
+            // Switch to transfer tab
+            switchTab('transfer');
+            
+            setupDataHandlers(state.conn);
+          });
+          
+          state.conn.on('close', () => {
+            logMessage('Connection closed', 'warning');
+            updateConnectionStatus(false);
+            showAlert('Connection closed by peer', 'warning');
+            
+            if (state.receiving && state.writer) {
+              state.writer.abort();
+              logMessage('Download canceled due to connection close', 'error');
+            }
+            
+            state.conn = null;
+            resetTransferState();
+          });
+          
+          state.conn.on('error', err => {
+            logMessage(`Connection error: ${err}`, 'error');
+            updateConnectionStatus(false);
+          });
+        });
+
+        state.peer.on('error', err => {
+          const errorMessage = err.message || err.type || 'Unknown error';
+          logMessage(`PeerJS error: ${errorMessage}`, 'error');
+          
+          if (err.type === 'peer-unavailable') {
+            showAlert('Could not connect: Peer not found or offline', 'error');
+          } else if (err.type === 'network') {
+            showAlert('Network error: Check your internet connection', 'error');
+          } else if (err.type === 'server-error') {
+            showAlert('Server error: The PeerJS server is experiencing issues', 'error');
+          } else {
+            showAlert(`Connection error: ${errorMessage}`, 'error');
+          }
+        });
+
+        state.peer.on('disconnected', () => {
+          logMessage('Disconnected from PeerJS server', 'warning');
+          
+          // Try to reconnect
+          setTimeout(() => {
+            if (state.peer) {
+              state.peer.reconnect();
+            }
+          }, 3000);
+        });
+
+      } catch (error) {
+        logMessage(`Failed to initialize PeerJS: ${error.message}`, 'error');
+        showAlert('Failed to initialize the connection. Please reload the page.', 'error');
+      }
+    }
+
+    // Set up handlers for receiving data
+    function setupDataHandlers(conn) {
+      conn.on('data', async data => {
+        // Handle connection messages (plain text)
+        if (typeof data === 'string') {
+          if (data === 'EOF') {
+            if (state.writer) {
+              try {
+                await state.writer.close();
+                logMessage('File received successfully', 'success');
+                showAlert(`File "${state.fileMeta.name}" has been downloaded successfully!`, 'success');
+              } catch (error) {
+                logMessage(`Error finalizing file: ${error.message}`, 'error');
+              }
+            }
+            resetTransferState();
+            return;
+          }
+          
+          if (data === 'CANCEL') {
+            logMessage('Transfer canceled by sender', 'warning');
+            showAlert('The sender canceled the file transfer', 'warning');
+            
+            if (state.writer) {
+              try {
+                await state.writer.abort();
+              } catch (error) {
+                logMessage(`Error aborting download: ${error.message}`, 'error');
+              }
+            }
+            
+            resetTransferState();
+            return;
+          }
+          
+          // Regular text message
+          if (!data.startsWith('{')) {
+            logMessage(`Message from peer: ${data}`);
+            return;
+          }
+        }
+        
+        // Handle file metadata
+        if (typeof data === 'object' && data !== null && !ArrayBuffer.isView(data) && !(data instanceof ArrayBuffer) && data.name && data.size) {
+          state.fileMeta = data;
+          state.receivedSize = 0;
+          state.receiving = true;
+          state.startTime = Date.now();
+          state.lastUpdateTime = Date.now();
+          state.lastReceivedSize = 0;
+          
+          logMessage(`Receiving file: ${state.fileMeta.name} (${formatBytes(state.fileMeta.size)})`);
+          
+          elements.transferTitle.textContent = `Receiving: ${state.fileMeta.name}`;
+          elements.progressContainer.style.display = 'block';
+          elements.status.textContent = 'Starting download...';
+          elements.progressBar.style.width = '0%';
+          
+          try {
+            state.fileStream = streamSaver.createWriteStream(state.fileMeta.name, {
+              size: state.fileMeta.size
+            });
+            state.writer = state.fileStream.getWriter();
+          } catch (error) {
+            logMessage(`Error creating file stream: ${error.message}`, 'error');
+            conn.send('CANCEL');
+            resetTransferState();
+          }
+          return;
+        }
+        
+        // Handle file chunks
+        if ((data instanceof ArrayBuffer) && state.writer) {
+          try {
+            state.receivedSize += data.byteLength;
+            
+            updateTransferProgress(state.receivedSize, state.fileMeta.size, false);
+            
+            await state.writer.write(new Uint8Array(data));
+          } catch (error) {
+            logMessage(`Error writing file chunk: ${error.message}`, 'error');
+            
+            if (state.writer) {
+              try {
+                await state.writer.abort();
+              } catch {}
+            }
+            
+            conn.send('CANCEL');
+            resetTransferState();
+          }
+        }
+      });
+    }
+
+    // Send a file in chunks
+    async function sendFile() {
+      if (!state.conn?.open || !state.file) return;
+      
+      state.transferring = true;
+      state.startTime = Date.now();
+      state.lastUpdateTime = Date.now();
+      state.lastReceivedSize = 0;
+      state.cancelTransfer = false;
+      
+      elements.transferTitle.textContent = `Sending: ${state.file.name}`;
+      elements.progressContainer.style.display = 'block';
+      elements.status.textContent = 'Preparing to send...';
+      elements.progressBar.style.width = '0%';
+      
+      // Send file metadata first
+      logMessage(`Sending file: ${state.file.name} (${formatBytes(state.file.size)})`);
+      state.conn.send({
+        name: state.file.name,
+        size: state.file.size,
+        type: state.file.type,
+        lastModified: state.file.lastModified
+      });
+
+      // Process the file in chunks
+      let offset = 0;
+      let sentBytes = 0;
+      
+      while (offset < state.file.size && !state.cancelTransfer) {
+        const slice = state.file.slice(offset, offset + CHUNK_SIZE);
+        
+        try {
+          // Read the slice as an ArrayBuffer
+          const buffer = await slice.arrayBuffer();
+          
+          // Send the chunk if connection is still open
+          if (state.conn?.open && !state.cancelTransfer) {
+            state.conn.send(buffer);
+            offset += buffer.byteLength;
+            sentBytes += buffer.byteLength;
+            
+            updateTransferProgress(sentBytes, state.file.size);
+          } else {
+            break;
+          }
+          
+          // Small pause to allow UI updates and prevent browser hanging
+          if (offset % (CHUNK_SIZE * 4) === 0) {
+            await new Promise(resolve => setTimeout(resolve, 1));
+          }
+        } catch (error) {
+          logMessage(`Error reading file chunk: ${error.message}`, 'error');
+          
+          if (state.conn?.open) {
+            state.conn.send('CANCEL');
+          }
+          
+          resetTransferState();
+          return;
+        }
+      }
+      
+      // If the transfer was not canceled, send EOF
+      if (state.conn?.open && !state.cancelTransfer) {
+        state.conn.send('EOF');
+        logMessage('File sent successfully', 'success');
+        showAlert('File sent successfully!', 'success');
+      } else if (state.cancelTransfer) {
+        logMessage('File transfer canceled', 'warning');
+      }
+      
+      resetTransferState();
+      resetFileInput();
+    }
+
+    // Switch between tabs
+    function switchTab(tabId) {
+      elements.tabs.forEach(tab => {
+        if (tab.dataset.tab === tabId) {
+          tab.classList.add('active');
+        } else {
+          tab.classList.remove('active');
+        }
+      });
+
+      elements.tabContents.forEach(content => {
+        if (content.id === `${tabId}-tab`) {
+          content.classList.add('active');
+        } else {
+          content.classList.remove('active');
+        }
+      });
+    }
+
+    // Event listeners
+    document.addEventListener('DOMContentLoaded', () => {
+      // Initialize PeerJS
+      initializePeer();
+      
+      // Tab switching
+      elements.tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          if (!tab.classList.contains('disabled')) {
+            switchTab(tab.dataset.tab);
+          }
+        });
+      });
+      
+      // Connect button
+      elements.connectBtn.addEventListener('click', () => {
+        const shortId = elements.connectId.value.trim();
+        
+        if (!/^\d{4}$/.test(shortId)) {
+          showAlert('Please enter a valid 4-digit code', 'error');
+          return;
+        }
+        
+        // Close existing connection if any
+        if (state.conn && state.conn.open) {
+          state.conn.close();
+        }
+        
+        const fullId = PREFIX + shortId;
+        logMessage(`Connecting to peer: ${shortId}...`);
+        
+        try
