@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P File Transfer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/streamsaver/2.0.6/StreamSaver.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .connection-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        input[type=text] {
+            width: 100%;
+            padding: 12px 20px;
+            margin: 8px 0;
+            box-sizing: border-box;
+            border: 2px solid #ccc;
+            border-radius: 4px;
+        }
+        .progress-bar {
+            width: 100%;
+            background-color: #ddd;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .progress {
+            height: 20px;
+            background-color: #4CAF50;
+            border-radius: 4px;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .status {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>P2P File Transfer</h1>
+    <div class="container">
+        <div id="connection-setup" class="card">
+            <div class="connection-grid">
+                <div>
+                    <h2>Your ID</h2>
+                    <div class="status" id="my-id">Loading...</div>
+                    <button id="copy-id">Copy ID</button>
+                </div>
+                <div>
+                    <h2>Connect to Peer</h2>
+                    <input type="text" id="peer-id" placeholder="Enter peer ID">
+                    <button id="connect-button">Connect</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="file-transfer" class="card" style="display: none;">
+            <h2>Connection Status: <span id="connection-status">Not Connected</span></h2>
+            
+            <div id="send-file-section">
+                <h3>Send File</h3>
+                <input type="file" id="file-input">
+                <button id="send-button" disabled>Send</button>
+                <div class="status" id="send-status"></div>
+                <div class="progress-bar">
+                    <div class="progress" id="send-progress-bar"></div>
+                </div>
+            </div>
+            
+            <div id="receive-file-section">
+                <h3>Receive File</h3>
+                <div class="status" id="receive-status">No incoming files</div>
+                <div class="progress-bar">
+                    <div class="progress" id="receive-progress-bar"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CHUNK_SIZE = 16384;
+        let peer;
+        let connection;
+        let fileReader;
+        let currentFileSize = 0;
+        let currentFile = null;
+        let currentChunk = 0;
+        let totalChunks = 0;
+        let receivedSize = 0;
+        let fileWriteStream = null;
+        let receivingFile = false;
+        let fileMetadata = null;
+        let writer = null;
+
+        window.onload = () => {
+            initializePeer();
+            document.getElementById('copy-id').addEventListener('click', copyMyId);
+            document.getElementById('connect-button').addEventListener('click', connectToPeer);
+            document.getElementById('file-input').addEventListener('change', handleFileSelection);
+            document.getElementById('send-button').addEventListener('click', sendFile);
+        };
+
+        function generatePeerId() {
+            const randomNum = Math.floor(1000 + Math.random() * 9000);
+            return `peershare${randomNum}`;
+        }
+
+        function initializePeer() {
+            const peerId = generatePeerId();
+            peer = new Peer(peerId);
+            
+            peer.on('open', (id) => {
+                document.getElementById('my-id').textContent = id;
+            });
+            
+            peer.on('connection', (conn) => {
+                connection = conn;
+                setupConnectionListeners();
+            });
+            
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                alert('Connection error: ' + err.message);
+                
+                if (err.type === 'unavailable-id') {
+                    setTimeout(() => {
+                        const newPeerId = generatePeerId();
+                        peer = new Peer(newPeerId);
+                        setupPeerListeners();
+                    }, 500);
+                }
+            });
+        }
+
+        function setupPeerListeners() {
+            peer.on('open', (id) => {
+                document.getElementById('my-id').textContent = id;
+            });
+            
+            peer.on('connection', (conn) => {
+                connection = conn;
+                setupConnectionListeners();
+            });
+            
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                alert('Connection error: ' + err.message);
+                
+                if (err.type === 'unavailable-id') {
+                    setTimeout(() => {
+                        const newPeerId = generatePeerId();
+                        peer = new Peer(newPeerId);
+                        setupPeerListeners();
+                    }, 500);
+                }
+            });
+        }
+
+        function copyMyId() {
+            const myId = document.getElementById('my-id').textContent;
+            navigator.clipboard.writeText(myId).then(() => {
+                alert('ID copied to clipboard');
+            });
+        }
+
+        function connectToPeer() {
+            const peerId = document.getElementById('peer-id').value.trim();
+            if (!peerId) {
+                alert('Please enter a peer ID');
+                return;
+            }
+            
+            connection = peer.connect(peerId, { reliable: true });
+            setupConnectionListeners();
+        }
+
+        function setupConnectionListeners() {
+            connection.on('open', () => {
+                document.getElementById('connection-status').textContent = 'Connected';
+                document.getElementById('file-transfer').style.display = 'block';
+                document.getElementById('send-button').disabled = false;
+            });
+            
+            connection.on('data', handleIncomingData);
+            
+            connection.on('close', () => {
+                document.getElementById('connection-status').textContent = 'Disconnected';
+                document.getElementById('send-button').disabled = true;
+            });
+            
+            connection.on('error', (err) => {
+                console.error('Connection error:', err);
+                alert('Connection error: ' + err.message);
+            });
+        }
+
+        function handleFileSelection(event) {
+            currentFile = event.target.files[0];
+            if (currentFile) {
+                currentFileSize = currentFile.size;
+                document.getElementById('send-status').textContent = `Selected: ${currentFile.name} (${formatFileSize(currentFile.size)})`;
+                document.getElementById('send-button').disabled = false;
+            } else {
+                document.getElementById('send-button').disabled = true;
+            }
+        }
+
+        function sendFile() {
+            if (!currentFile || !connection) return;
+            
+            fileReader = new FileReader();
+            currentChunk = 0;
+            totalChunks = Math.ceil(currentFile.size / CHUNK_SIZE);
+            
+            const metadata = {
+                type: 'file-metadata',
+                name: currentFile.name,
+                size: currentFile.size,
+                fileType: currentFile.type
+            };
+            
+            connection.send(metadata);
+            document.getElementById('send-status').textContent = 'Sending metadata...';
+            document.getElementById('send-progress-bar').style.width = '0%';
+            
+            fileReader.onload = (e) => {
+                connection.send(e.target.result);
+                currentChunk++;
+                
+                const percentComplete = Math.round((currentChunk / totalChunks) * 100);
+                document.getElementById('send-status').textContent = `Sending: ${percentComplete}% (${currentChunk}/${totalChunks} chunks)`;
+                document.getElementById('send-progress-bar').style.width = `${percentComplete}%`;
+                
+                if (currentChunk < totalChunks) {
+                    readNextChunk();
+                } else {
+                    document.getElementById('send-status').textContent = 'File sent successfully!';
+                    connection.send({ type: 'file-complete' });
+                }
+            };
+            
+            fileReader.onerror = (error) => {
+                console.error('Error reading file:', error);
+                document.getElementById('send-status').textContent = 'Error sending file';
+                connection.send({ type: 'file-error' });
+            };
+            
+            readNextChunk();
+        }
+
+        function readNextChunk() {
+            const start = currentChunk * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, currentFileSize);
+            const chunk = currentFile.slice(start, end);
+            fileReader.readAsArrayBuffer(chunk);
+        }
+
+        function handleIncomingData(data) {
+            if (typeof data === 'object' && data !== null && !ArrayBuffer.isView(data) && !(data instanceof ArrayBuffer)) {
+                if (data.type === 'file-metadata') {
+                    receivedSize = 0;
+                    receivingFile = true;
+                    fileMetadata = data;
+                    
+                    document.getElementById('receive-status').textContent = `Receiving: ${data.name} (${formatFileSize(data.size)})`;
+                    document.getElementById('receive-progress-bar').style.width = '0%';
+                    
+                    try {
+                        fileWriteStream = streamSaver.createWriteStream(data.name, {
+                            size: data.size
+                        });
+                        
+                        writer = fileWriteStream.getWriter();
+                    } catch (error) {
+                        console.error('Error creating write stream:', error);
+                        document.getElementById('receive-status').textContent = 'Error creating file stream';
+                    }
+                } else if (data.type === 'file-complete') {
+                    if (writer) {
+                        writer.close();
+                    }
+                    
+                    document.getElementById('receive-status').textContent = `File received: ${fileMetadata.name}`;
+                    document.getElementById('receive-progress-bar').style.width = '100%';
+                    
+                    receivingFile = false;
+                    fileMetadata = null;
+                    fileWriteStream = null;
+                    writer = null;
+                } else if (data.type === 'file-error') {
+                    document.getElementById('receive-status').textContent = 'Error receiving file';
+                    
+                    if (writer) {
+                        writer.abort();
+                    }
+                    
+                    receivingFile = false;
+                    fileMetadata = null;
+                    fileWriteStream = null;
+                    writer = null;
+                }
+            } else if (receivingFile && writer) {
+                try {
+                    const chunk = new Uint8Array(data);
+                    writer.write(chunk);
+                    
+                    receivedSize += chunk.length;
+                    const percentComplete = Math.min(100, Math.round((receivedSize / fileMetadata.size) * 100));
+                    document.getElementById('receive-status').textContent = `Receiving: ${percentComplete}% (${formatFileSize(receivedSize)} / ${formatFileSize(fileMetadata.size)})`;
+                    document.getElementById('receive-progress-bar').style.width = `${percentComplete}%`;
+                } catch (error) {
+                    console.error('Error writing chunk:', error);
+                    document.getElementById('receive-status').textContent = 'Error processing file chunk';
+                }
+            }
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' bytes';
+            else if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+            else if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+            else return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+    </script>
+</body>
+</html>
