@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>P2P File Transfer (Peer.js + StreamSaver)</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="https://unpkg.com/streamsaver@2.0.5/stream-saver.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; max-width: 600px; margin: auto; }
+    input, button { margin: 0.5rem 0; display: block; width: 100%; padding: 0.5rem; font-size: 1rem; }
+    #log { white-space: pre-wrap; background: #eee; padding: 1rem; height: 200px; overflow-y: auto; margin-top: 1rem; }
+    #progress-container { margin-top: 1rem; display: none; }
+    #progress-bar { width: 100%; background: #ddd; height: 30px; border-radius: 5px; }
+    #progress { width: 0; background: green; height: 100%; border-radius: 5px; }
+    #status { margin-top: 1rem; font-size: 1.1rem; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>P2P File Transfer</h2>
+
+  <div>
+    <label>Your 4-digit Share Code:</label>
+    <input type="text" id="my-id" readonly />
+
+    <label>Enter 4-digit Code to Connect:</label>
+    <input type="text" id="connect-id" placeholder="e.g. 4217" maxlength="4" />
+    <button id="connect-btn">Connect</button>
+  </div>
+
+  <hr />
+
+  <div>
+    <input type="file" id="file-input" />
+    <button id="send-btn">Send File</button>
+  </div>
+
+  <div id="log"></div>
+
+  <div id="progress-container">
+    <div id="progress-bar">
+      <div id="progress"></div>
+    </div>
+    <div id="status">Preparing to download...</div>
+  </div>
+
+  <script>
+    const PREFIX = 'peerstreamsharing';
+
+    function generatePeerId() {
+      const suffix = Math.floor(Math.random() * 9000 + 1000);
+      window.peerSuffix = suffix;
+      return PREFIX + suffix;
+    }
+
+    const peer = new Peer(generatePeerId(), {
+      host: 'peerjs.com',
+      port: 443,
+      secure: true
+    });
+
+    const log = msg => document.getElementById('log').textContent += msg + '\n';
+    const fileInput = document.getElementById('file-input');
+    const progressContainer = document.getElementById('progress-container');
+    const progressBar = document.getElementById('progress');
+    const statusText = document.getElementById('status');
+    let conn;
+
+    peer.on('open', id => {
+      document.getElementById('my-id').value = peerSuffix;
+      log(`Your full Peer ID: ${id}`);
+    });
+
+    document.getElementById('connect-btn').onclick = () => {
+      const shortId = document.getElementById('connect-id').value.trim();
+      if (!/^\d{4}$/.test(shortId)) return alert('Please enter a valid 4-digit code.');
+
+      const fullId = PREFIX + shortId;
+      conn = peer.connect(fullId);
+
+      conn.on('open', () => {
+        log(`Connected to ${fullId}`);
+        setupReceiver(conn);
+      });
+
+      conn.on('error', err => {
+        log('Connection error: ' + err);
+      });
+    };
+
+    peer.on('connection', connection => {
+      conn = connection;
+      conn.on('open', () => {
+        log(`Incoming connection from ${conn.peer}`);
+        setupReceiver(conn);
+      });
+    });
+
+    document.getElementById('send-btn').onclick = () => {
+      if (!conn?.open) return alert('Not connected to a peer.');
+      const file = fileInput.files[0];
+      if (!file) return alert('Please select a file to send.');
+
+      log(`Sending file: ${file.name} (${file.size} bytes)`);
+      conn.send({ name: file.name, size: file.size });
+
+      const chunkSize = 64 * 1024; // 64 KB
+      let offset = 0;
+      const reader = new FileReader();
+
+      reader.onload = e => {
+        conn.send(e.target.result);
+        offset += chunkSize;
+        if (offset < file.size) {
+          readSlice(offset);
+        } else {
+          conn.send('EOF');
+          log('File sent completely.');
+        }
+      };
+
+      const readSlice = o => {
+        const slice = file.slice(offset, o + chunkSize);
+        reader.readAsArrayBuffer(slice);
+      };
+
+      readSlice(0);
+    };
+
+    function setupReceiver(conn) {
+      let fileStream, writer;
+      let fileMeta = null;
+      let receivedSize = 0;
+
+      conn.on('data', async data => {
+        if (typeof data === 'object' && data.name && data.size) {
+          fileMeta = data;
+          log(`Receiving file: ${fileMeta.name} (${fileMeta.size} bytes)`);
+
+          progressContainer.style.display = 'block';
+          statusText.textContent = 'Starting download...';
+          progressBar.style.width = '0%';
+
+          fileStream = streamSaver.createWriteStream(fileMeta.name, {
+            size: fileMeta.size
+          });
+
+          writer = fileStream.getWriter();
+        } else if (data === 'EOF') {
+          writer?.close();
+          log('File received completely.');
+          statusText.textContent = 'Download complete!';
+          setTimeout(() => progressContainer.style.display = 'none', 2000);
+        } else if (data instanceof ArrayBuffer) {
+          receivedSize += data.byteLength;
+
+          const percent = (receivedSize / fileMeta.size) * 100;
+          progressBar.style.width = `${percent}%`;
+          statusText.textContent = `Downloading: ${Math.round(percent)}%`;
+
+          await writer.write(new Uint8Array(data));
+        }
+      });
+    }
+  </script>
+</body>
+</html>
