@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P File Transfer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/streamsaver/2.0.6/StreamSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/web-streams-polyfill@2.0.2/dist/ponyfill.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/workbox-window/6.5.4/workbox-window.prod.umd.min.js"></script>
+</head>
+<body>
+    <h1>P2P File Transfer</h1>
+    <div id="connection-setup">
+        <div>
+            <h2>Your ID: <span id="my-id">Loading...</span></h2>
+            <button id="copy-id">Copy ID</button>
+        </div>
+        <div>
+            <h2>Connect to Peer</h2>
+            <input type="text" id="peer-id" placeholder="Enter peer ID">
+            <button id="connect-button">Connect</button>
+        </div>
+    </div>
+
+    <div id="file-transfer" style="display: none;">
+        <h2>Connection Status: <span id="connection-status">Not Connected</span></h2>
+        
+        <div id="send-file-section">
+            <h3>Send File</h3>
+            <input type="file" id="file-input">
+            <button id="send-button" disabled>Send</button>
+            <div id="send-status"></div>
+        </div>
+        
+        <div id="receive-file-section">
+            <h3>Receive File</h3>
+            <div id="receive-status">No incoming files</div>
+        </div>
+    </div>
+
+    <script>
+        if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+            alert('StreamSaver requires HTTPS to work properly for large files. Please use HTTPS or localhost.');
+        }
+
+        const CHUNK_SIZE = 1024 * 1024;
+        let peer;
+        let connection;
+        let fileReader;
+        let currentFileSize = 0;
+        let currentFile = null;
+        let currentChunk = 0;
+        let totalChunks = 0;
+        let receivedSize = 0;
+        let receivingFile = false;
+        let fileMetadata = null;
+        let fileWriteStream = null;
+        let writer = null;
+        let downloadStarted = false;
+
+        window.onload = () => {
+            streamSaver.mitm = 'https://jimmywarting.github.io/StreamSaver.js/mitm.html';
+            
+            initializePeer();
+            document.getElementById('copy-id').addEventListener('click', copyMyId);
+            document.getElementById('connect-button').addEventListener('click', connectToPeer);
+            document.getElementById('file-input').addEventListener('change', handleFileSelection);
+            document.getElementById('send-button').addEventListener('click', sendFile);
+        };
+
+        function generatePeerId() {
+            const randomNum = Math.floor(1000 + Math.random() * 9000);
+            return `peershare${randomNum}`;
+        }
+
+        function initializePeer() {
+            const peerId = generatePeerId();
+            peer = new Peer(peerId, {
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' }
+                    ]
+                }
+            });
+            
+            peer.on('open', (id) => {
+                document.getElementById('my-id').textContent = id;
+            });
+            
+            peer.on('connection', (conn) => {
+                connection = conn;
+                setupConnectionListeners();
+            });
+            
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                alert('Connection error: ' + err.message);
+                
+                if (err.type === 'unavailable-id') {
+                    setTimeout(() => {
+                        const newPeerId = generatePeerId();
+                        peer = new Peer(newPeerId);
+                        setupPeerListeners();
+                    }, 500);
+                }
+            });
+        }
+
+        function setupPeerListeners() {
+            peer.on('open', (id) => {
+                document.getElementById('my-id').textContent = id;
+            });
+            
+            peer.on('connection', (conn) => {
+                connection = conn;
+                setupConnectionListeners();
+            });
+            
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                alert('Connection error: ' + err.message);
+            });
+        }
+
+        function copyMyId() {
+            const myId = document.getElementById('my-id').textContent;
+            navigator.clipboard.writeText(myId).then(() => {
+                alert('ID copied to clipboard');
+            });
+        }
+
+        function connectToPeer() {
+            const peerId = document.getElementById('peer-id').value.trim();
+            if (!peerId) {
+                alert('Please enter a peer ID');
+                return;
+            }
+            
+            connection = peer.connect(peerId, { 
+                reliable: true,
+                serialization: 'binary',
+                channelConfig: {
+                    ordered: true,
+                    maxRetransmits: 10
+                }
+            });
+            setupConnectionListeners();
+        }
+
+        function setupConnectionListeners() {
+            connection.on('open', () => {
+                document.getElementById('connection-status').textContent = 'Connected';
+                document.getElementById('file-transfer').style.display = 'block';
+                document.getElementById('send-button').disabled = false;
+            });
+            
+            connection.on('data', handleIncomingData);
+            
+            connection.on('close', () => {
+                document.getElementById('connection-status').textContent = 'Disconnected';
+                document.getElementById('send-button').disabled = true;
+                if (writer && receivingFile) {
+                    writer.abort();
+                    document.getElementById('receive-status').textContent = 'Connection closed during file transfer';
+                }
+            });
+            
+            connection.on('error', (err) => {
+                console.error('Connection error:', err);
+                alert('Connection error: ' + err.message);
+                if (writer && receivingFile) {
+                    writer.abort();
+                    document.getElementById('receive-status').textContent = 'Connection error during file transfer';
+                }
+            });
+        }
+
+        function handleFileSelection(event) {
+            currentFile = event.target.files[0];
+            if (currentFile) {
+                currentFileSize = currentFile.size;
+                document.getElementById('send-status').textContent = `Selected: ${currentFile.name} (${formatFileSize(currentFile.size)})`;
+                document.getElementById('send-button').disabled = false;
+            } else {
+                document.getElementById('send-button').disabled = true;
+            }
+        }
+
+        function sendFile() {
+            if (!currentFile || !connection) return;
+            
+            fileReader = new FileReader();
+            currentChunk = 0;
+            totalChunks = Math.ceil(currentFile.size / CHUNK_SIZE);
+            
+            const metadata = {
+                type: 'file-metadata',
+                name: currentFile.name,
+                size: currentFile.size,
+                fileType: currentFile.type,
+                chunkSize: CHUNK_SIZE,
+                totalChunks: totalChunks
+            };
+            
+            connection.send(JSON.stringify(metadata));
+            document.getElementById('send-status').textContent = 'Sending metadata...';
+            
+            fileReader.onload = (e) => {
+                connection.send(e.target.result);
+                currentChunk++;
+                
+                const percentComplete = Math.round((currentChunk / totalChunks) * 100);
+                document.getElementById('send-status').textContent = `Sending: ${percentComplete}% (${formatFileSize(currentChunk * CHUNK_SIZE < currentFileSize ? currentChunk * CHUNK_SIZE : currentFileSize)} / ${formatFileSize(currentFileSize)})`;
+                
+                if (currentChunk < totalChunks) {
+                    readNextChunk();
+                } else {
+                    document.getElementById('send-status').textContent = 'File sent successfully!';
+                    connection.send(JSON.stringify({ type: 'file-complete' }));
+                }
+            };
+            
+            fileReader.onerror = (error) => {
+                console.error('Error reading file:', error);
+                document.getElementById('send-status').textContent = 'Error sending file';
+                connection.send(JSON.stringify({ type: 'file-error' }));
+            };
+            
+            readNextChunk();
+        }
+
+        function readNextChunk() {
+            const start = currentChunk * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, currentFileSize);
+            const chunk = currentFile.slice(start, end);
+            fileReader.readAsArrayBuffer(chunk);
+        }
+
+        function handleIncomingData(data) {
+            if (typeof data === 'string') {
+                try {
+                    const jsonData = JSON.parse(data);
+                    
+                    if (jsonData.type === 'file-metadata') {
+                        receivedSize = 0;
+                        receivingFile = true;
+                        fileMetadata = jsonData;
+                        downloadStarted = false;
+                        
+                        document.getElementById('receive-status').textContent = `Receiving: ${jsonData.name} (${formatFileSize(jsonData.size)})`;
+                    } else if (jsonData.type === 'file-complete') {
+                        if (writer) {
+                            writer.close();
+                        }
+                        
+                        document.getElementById('receive-status').textContent = `File received: ${fileMetadata.name} - Your browser has downloaded or is downloading the file`;
+                        
+                        receivingFile = false;
+                        fileMetadata = null;
+                        fileWriteStream = null;
+                        writer = null;
+                    } else if (jsonData.type === 'file-error') {
+                        document.getElementById('receive-status').textContent = 'Error receiving file';
+                        
+                        if (writer) {
+                            writer.abort();
+                        }
+                        
+                        receivingFile = false;
+                        fileMetadata = null;
+                        fileWriteStream = null;
+                        writer = null;
+                    }
+                } catch (error) {
+                    console.error('Error parsing JSON:', error);
+                }
+            } else if (receivingFile) {
+                try {
+                    if (!downloadStarted) {
+                        fileWriteStream = streamSaver.createWriteStream(fileMetadata.name, {
+                            size: fileMetadata.size
+                        });
+                        writer = fileWriteStream.getWriter();
+                        downloadStarted = true;
+                    }
+                    
+                    const chunk = new Uint8Array(data);
+                    writer.write(chunk);
+                    
+                    receivedSize += chunk.byteLength;
+                    const percentComplete = Math.min(100, Math.round((receivedSize / fileMetadata.size) * 100));
+                    document.getElementById('receive-status').textContent = `Receiving: ${percentComplete}% (${formatFileSize(receivedSize)} / ${formatFileSize(fileMetadata.size)})`;
+                } catch (error) {
+                    console.error('Error processing chunk:', error);
+                    document.getElementById('receive-status').textContent = 'Error processing file chunk';
+                    
+                    if (writer) {
+                        writer.abort();
+                    }
+                    
+                    receivingFile = false;
+                }
+            }
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' bytes';
+            else if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+            else if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+            else return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+    </script>
+</body>
+</html>
