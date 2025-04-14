@@ -355,11 +355,9 @@
   </div>
 
   <script>
-    // Constants
     const PREFIX = 'securedrop';
-    const CHUNK_SIZE = 256 * 1024; // 256 KB chunks
+    const CHUNK_SIZE = 256 * 1024;
 
-    // DOM Elements
     const elements = {
       myId: document.getElementById('my-id'),
       connectId: document.getElementById('connect-id'),
@@ -388,7 +386,6 @@
       tabContents: document.querySelectorAll('.tab-content')
     };
 
-    // State
     let state = {
       peer: null,
       conn: null,
@@ -405,7 +402,6 @@
       cancelTransfer: false
     };
 
-    // Helper functions
     function formatBytes(bytes, decimals = 2) {
       if (bytes === 0) return '0 Bytes';
       const k = 1024;
@@ -477,7 +473,6 @@
       alertDiv.className = `alert alert-${type}`;
       alertDiv.textContent = message;
       
-      // Add close button
       const closeBtn = document.createElement('span');
       closeBtn.innerHTML = '&times;';
       closeBtn.style.float = 'right';
@@ -487,7 +482,6 @@
       
       elements.alertContainer.appendChild(alertDiv);
       
-      // Auto-remove after 5 seconds for success messages
       if (type === 'success') {
         setTimeout(() => {
           if (alertDiv.parentNode) {
@@ -501,7 +495,6 @@
       if (connected) {
         elements.connectionStatus.textContent = `Connected to ${peer}`;
         elements.connectionIndicator.classList.add('status-connected');
-        // Enable the transfer tab
         document.querySelector('.tab[data-tab="transfer"]').classList.remove('disabled');
         elements.sendBtn.disabled = !state.file;
       } else {
@@ -518,9 +511,7 @@
       const now = Date.now();
       const elapsedMs = now - state.startTime;
       
-      // Update speed and ETA every 500ms
       if (now - state.lastUpdateTime > 500) {
-        // Calculate speed in bytes per second
         const timeDiff = (now - state.lastUpdateTime) / 1000;
         const loadedDiff = isUpload ? 
           loaded - state.lastReceivedSize :
@@ -529,7 +520,6 @@
         const speedBps = loadedDiff / timeDiff;
         const formattedSpeed = formatBytes(speedBps) + '/s';
         
-        // Calculate ETA
         const remaining = total - loaded;
         const eta = remaining / speedBps;
         
@@ -566,9 +556,7 @@
       elements.estimatedTime.textContent = '';
     }
 
-    // Initialize PeerJS connection
     function initializePeer() {
-      // Generate a random 4-digit code
       const generatePeerId = () => {
         const suffix = Math.floor(Math.random() * 9000 + 1000);
         window.peerSuffix = suffix;
@@ -589,7 +577,6 @@
         });
 
         state.peer.on('connection', connection => {
-          // Only allow one connection at a time
           if (state.conn && state.conn.open) {
             logMessage('Received connection request but already connected to another peer', 'warning');
             connection.close();
@@ -603,7 +590,6 @@
             updateConnectionStatus(true, state.conn.peer.substring(PREFIX.length));
             showAlert('Connection established!', 'success');
             
-            // Switch to transfer tab
             switchTab('transfer');
             
             setupDataHandlers(state.conn);
@@ -647,7 +633,6 @@
         state.peer.on('disconnected', () => {
           logMessage('Disconnected from PeerJS server', 'warning');
           
-          // Try to reconnect
           setTimeout(() => {
             if (state.peer) {
               state.peer.reconnect();
@@ -661,10 +646,8 @@
       }
     }
 
-    // Set up handlers for receiving data
     function setupDataHandlers(conn) {
       conn.on('data', async data => {
-        // Handle connection messages (plain text)
         if (typeof data === 'string') {
           if (data === 'EOF') {
             if (state.writer) {
@@ -696,14 +679,12 @@
             return;
           }
           
-          // Regular text message
           if (!data.startsWith('{')) {
             logMessage(`Message from peer: ${data}`);
             return;
           }
         }
         
-        // Handle file metadata
         if (typeof data === 'object' && data !== null && !ArrayBuffer.isView(data) && !(data instanceof ArrayBuffer) && data.name && data.size) {
           state.fileMeta = data;
           state.receivedSize = 0;
@@ -732,7 +713,6 @@
           return;
         }
         
-        // Handle file chunks
         if ((data instanceof ArrayBuffer) && state.writer) {
           try {
             state.receivedSize += data.byteLength;
@@ -756,7 +736,6 @@
       });
     }
 
-    // Send a file in chunks
     async function sendFile() {
       if (!state.conn?.open || !state.file) return;
       
@@ -771,7 +750,6 @@
       elements.status.textContent = 'Preparing to send...';
       elements.progressBar.style.width = '0%';
       
-      // Send file metadata first
       logMessage(`Sending file: ${state.file.name} (${formatBytes(state.file.size)})`);
       state.conn.send({
         name: state.file.name,
@@ -780,7 +758,6 @@
         lastModified: state.file.lastModified
       });
 
-      // Process the file in chunks
       let offset = 0;
       let sentBytes = 0;
       
@@ -788,10 +765,8 @@
         const slice = state.file.slice(offset, offset + CHUNK_SIZE);
         
         try {
-          // Read the slice as an ArrayBuffer
           const buffer = await slice.arrayBuffer();
           
-          // Send the chunk if connection is still open
           if (state.conn?.open && !state.cancelTransfer) {
             state.conn.send(buffer);
             offset += buffer.byteLength;
@@ -802,7 +777,6 @@
             break;
           }
           
-          // Small pause to allow UI updates and prevent browser hanging
           if (offset % (CHUNK_SIZE * 4) === 0) {
             await new Promise(resolve => setTimeout(resolve, 1));
           }
@@ -818,7 +792,6 @@
         }
       }
       
-      // If the transfer was not canceled, send EOF
       if (state.conn?.open && !state.cancelTransfer) {
         state.conn.send('EOF');
         logMessage('File sent successfully', 'success');
@@ -831,7 +804,6 @@
       resetFileInput();
     }
 
-    // Switch between tabs
     function switchTab(tabId) {
       elements.tabs.forEach(tab => {
         if (tab.dataset.tab === tabId) {
@@ -850,12 +822,9 @@
       });
     }
 
-    // Event listeners
     document.addEventListener('DOMContentLoaded', () => {
-      // Initialize PeerJS
       initializePeer();
       
-      // Tab switching
       elements.tabs.forEach(tab => {
         tab.addEventListener('click', () => {
           if (!tab.classList.contains('disabled')) {
@@ -864,7 +833,6 @@
         });
       });
       
-      // Connect button
       elements.connectBtn.addEventListener('click', () => {
         const shortId = elements.connectId.value.trim();
         
@@ -873,7 +841,6 @@
           return;
         }
         
-        // Close existing connection if any
         if (state.conn && state.conn.open) {
           state.conn.close();
         }
@@ -881,4 +848,141 @@
         const fullId = PREFIX + shortId;
         logMessage(`Connecting to peer: ${shortId}...`);
         
-        try
+        try {
+          state.conn = state.peer.connect(fullId);
+          
+          state.conn.on('open', () => {
+            logMessage(`Connected to ${shortId}`, 'success');
+            updateConnectionStatus(true, shortId);
+            showAlert('Connection established!', 'success');
+            
+            switchTab('transfer');
+            
+            setupDataHandlers(state.conn);
+          });
+          
+          state.conn.on('error', err => {
+            logMessage(`Connection error: ${err}`, 'error');
+            updateConnectionStatus(false);
+          });
+          
+          state.conn.on('close', () => {
+            logMessage('Connection closed', 'warning');
+            updateConnectionStatus(false);
+            
+            state.conn = null;
+            resetTransferState();
+          });
+        } catch (error) {
+          logMessage(`Failed to connect: ${error.message}`, 'error');
+          showAlert(`Connection error: ${error.message}`, 'error');
+        }
+      });
+      
+      elements.fileInput.addEventListener('click', () => {
+        elements.fileSelector.click();
+      });
+      
+      elements.fileSelector.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+          state.file = e.target.files[0];
+          
+          elements.filePrompt.classList.add('hidden');
+          elements.selectedFile.classList.remove('hidden');
+          elements.fileName.textContent = state.file.name;
+          elements.fileSize.textContent = formatBytes(state.file.size);
+          elements.fileName.parentElement.firstElementChild.textContent = getFileIcon(state.file.name);
+          
+          elements.sendBtn.disabled = !(state.conn && state.conn.open);
+        }
+      });
+      
+      elements.fileInput.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        elements.fileInput.classList.add('drag-over');
+      });
+      
+      elements.fileInput.addEventListener('dragleave', () => {
+        elements.fileInput.classList.remove('drag-over');
+      });
+      
+      elements.fileInput.addEventListener('drop', (e) => {
+        e.preventDefault();
+        elements.fileInput.classList.remove('drag-over');
+        
+        if (e.dataTransfer.files.length > 0) {
+          state.file = e.dataTransfer.files[0];
+          
+          elements.filePrompt.classList.add('hidden');
+          elements.selectedFile.classList.remove('hidden');
+          elements.fileName.textContent = state.file.name;
+          elements.fileSize.textContent = formatBytes(state.file.size);
+          elements.fileName.parentElement.firstElementChild.textContent = getFileIcon(state.file.name);
+          
+          elements.sendBtn.disabled = !(state.conn && state.conn.open);
+        }
+      });
+      
+      elements.sendBtn.addEventListener('click', () => {
+        if (state.conn && state.conn.open && state.file) {
+          sendFile();
+        }
+      });
+      
+      elements.cancelBtn.addEventListener('click', () => {
+        if (state.transferring && state.conn && state.conn.open) {
+          state.cancelTransfer = true;
+          state.conn.send('CANCEL');
+          logMessage('Canceling file transfer...', 'warning');
+        }
+        
+        if (state.receiving && state.writer) {
+          state.writer.abort()
+            .then(() => {
+              logMessage('Download canceled', 'warning');
+            })
+            .catch(error => {
+              logMessage(`Error canceling download: ${error.message}`, 'error');
+            });
+        }
+        
+        resetTransferState();
+      });
+      
+      elements.clearLog.addEventListener('click', () => {
+        elements.log.innerHTML = '';
+      });
+      
+      elements.copyIdBtn.addEventListener('click', () => {
+        const id = elements.myId.value;
+        navigator.clipboard.writeText(id)
+          .then(() => {
+            showAlert('Share code copied to clipboard!', 'success');
+          })
+          .catch(err => {
+            showAlert('Failed to copy code', 'error');
+          });
+      });
+      
+      window.addEventListener('beforeunload', (e) => {
+        if (state.transferring || state.receiving) {
+          const message = 'File transfer in progress. Are you sure you want to leave?';
+          e.returnValue = message;
+          return message;
+        }
+      });
+      
+      window.addEventListener('online', () => {
+        logMessage('Internet connection restored', 'success');
+        if (state.peer && state.peer.disconnected) {
+          state.peer.reconnect();
+        }
+      });
+      
+      window.addEventListener('offline', () => {
+        logMessage('Internet connection lost', 'error');
+      });
+    });
+  </script>
+</body>
+</html>
