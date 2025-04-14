@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>P2P File Transfer (Peer.js + StreamSaver)</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="https://unpkg.com/streamsaver@2.0.5/stream-saver.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; }
+    input, button { margin: 0.5rem 0; display: block; }
+    #log { white-space: pre-wrap; background: #eee; padding: 1rem; height: 200px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h2>P2P File Transfer</h2>
+
+  <div>
+    <label>Your Peer ID:</label>
+    <input type="text" id="my-id" readonly />
+    <label>Connect to Peer ID:</label>
+    <input type="text" id="connect-id" />
+    <button id="connect-btn">Connect</button>
+  </div>
+
+  <hr />
+
+  <div>
+    <input type="file" id="file-input" />
+    <button id="send-btn">Send File</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script>
+    const log = msg => document.getElementById('log').textContent += msg + '\n';
+
+    const peer = new Peer(); // Connect to PeerJS cloud server
+    const fileInput = document.getElementById('file-input');
+    let conn;
+
+    peer.on('open', id => {
+      document.getElementById('my-id').value = id;
+      log(`Your ID: ${id}`);
+    });
+
+    document.getElementById('connect-btn').onclick = () => {
+      const peerId = document.getElementById('connect-id').value;
+      conn = peer.connect(peerId);
+      conn.on('open', () => {
+        log(`Connected to ${peerId}`);
+        setupReceiver(conn);
+      });
+    };
+
+    // Accept incoming connections
+    peer.on('connection', connection => {
+      conn = connection;
+      conn.on('open', () => {
+        log(`Peer ${conn.peer} connected`);
+        setupReceiver(conn);
+      });
+    });
+
+    // Sending the file
+    document.getElementById('send-btn').onclick = () => {
+      if (!conn?.open) return alert('Not connected');
+      const file = fileInput.files[0];
+      if (!file) return alert('No file selected');
+
+      log(`Sending file: ${file.name} (${file.size} bytes)`);
+      conn.send({ name: file.name, size: file.size });
+
+      const chunkSize = 64 * 1024; // 64 KB
+      let offset = 0;
+
+      const reader = new FileReader();
+
+      reader.onload = e => {
+        conn.send(e.target.result);
+        offset += chunkSize;
+        if (offset < file.size) {
+          readSlice(offset);
+        } else {
+          conn.send('EOF');
+          log('File sent completely.');
+        }
+      };
+
+      const readSlice = o => {
+        const slice = file.slice(offset, o + chunkSize);
+        reader.readAsArrayBuffer(slice);
+      };
+
+      readSlice(0);
+    };
+
+    // Receiving the file
+    function setupReceiver(conn) {
+      let fileStream, writer;
+      let fileMeta = null;
+
+      conn.on('data', async data => {
+        if (typeof data === 'object' && data.name && data.size) {
+          // Start new file stream
+          fileMeta = data;
+          log(`Receiving file: ${fileMeta.name} (${fileMeta.size} bytes)`);
+
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+          }
+
+          fileStream = streamSaver.createWriteStream(fileMeta.name, {
+            size: fileMeta.size
+          });
+
+          writer = fileStream.getWriter();
+        } else if (data === 'EOF') {
+          writer?.close();
+          log('File received completely.');
+        } else if (data instanceof ArrayBuffer) {
+          await writer.write(new Uint8Array(data));
+        }
+      });
+    }
+  </script>
+</body>
+</html>
